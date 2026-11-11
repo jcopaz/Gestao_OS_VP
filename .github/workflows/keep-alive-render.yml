@@ -14,7 +14,7 @@ jobs:
       - name: Ping /health da API (Render)
         run: |
           for i in 1 2 3; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "https://gestao-os-ee-mrs-producao.onrender.com/health")
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "${{ vars.API_BASE_URL }}/health")
             echo "Tentativa $i -> HTTP $code"
             if [ "$code" = "200" ]; then
               exit 0

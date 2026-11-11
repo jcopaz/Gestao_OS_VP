@@ -29,5 +29,5 @@ jobs:
             if [ -z "$dry_run" ]; then dry_run="true"; fi
           fi
           curl -s -X POST \
-            "https://gestao-os-ee-mrs-producao.onrender.com/limpar_evidencias_expiradas?dry_run=${dry_run}" \
+            "${{ vars.API_BASE_URL }}/limpar_evidencias_expiradas?dry_run=${dry_run}" \
             -H "x-api-key: ${{ secrets.OFFLINE_API_KEY }}"
