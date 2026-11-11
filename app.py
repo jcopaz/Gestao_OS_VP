@@ -37,6 +37,7 @@ from psycopg2.extras import execute_values
 from psycopg2 import pool
 
 import storage_evidencias
+import gerencia as G  # dados da gerência (coordenações, SAP, sedes, pátios)
 #endregion 1.1
 
 #region 1.2: Configurações Globais e Estilo Corporativo (Com Imagem)
@@ -459,7 +460,7 @@ def init_db():
             cur.execute("""
                 INSERT INTO usuarios (username, nome, senha_hash, perfil, escopo, reset_obrigatorio, governanca) 
                 VALUES (%s, %s, %s, %s, %s, 1, %s)
-            """, ('admin', 'Administrador do Sistema', hash_senha('mrs123'), 'Gerência', 'Todas', 'Painel Gerencial,Mapa de Campo,Upload de Dados,Gestão de Usuários'))
+            """, ('admin', 'Administrador do Sistema', hash_senha(str(st.secrets.get('ADMIN_SENHA_INICIAL', 'mrs123'))), 'Gerência', 'Todas', 'Painel Gerencial,Mapa de Campo,Upload de Dados,Gestão de Usuários'))
             
         conn.commit()
         cur.close()

@@ -28,6 +28,7 @@ from PIL.ExifTags import TAGS, GPSTAGS
 import requests
 
 import storage_evidencias
+import gerencia  # pátios/sedes compartilhados com o app.py
 
 # ==============================================================================
 # CONFIGURAÇÕES DE AMBIENTE (PRODUÇÃO)
