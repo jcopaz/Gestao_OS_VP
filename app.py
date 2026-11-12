@@ -267,7 +267,7 @@ def init_db():
                 username VARCHAR(255) PRIMARY KEY, nome VARCHAR(255), senha_hash VARCHAR(255) NOT NULL, 
                 perfil VARCHAR(50) NOT NULL, escopo VARCHAR(50) NOT NULL,
                 palavra_recuperacao VARCHAR(255) DEFAULT 'PENDENTE', dica_recuperacao VARCHAR(255) DEFAULT 'PENDENTE', 
-                reset_obrigatorio INTEGER DEFAULT 1, coordenacao_padrao VARCHAR(100) DEFAULT 'ICG'
+                reset_obrigatorio INTEGER DEFAULT 1, coordenacao_padrao VARCHAR(100) DEFAULT ''
             );
         """)
         cur.execute("""
@@ -1428,10 +1428,7 @@ def carregar_mapeamento_patios() -> dict:
 # exportaria pro SAP com o centro de trabalho errado, silenciosamente. Agora é
 # correspondência exata contra este dicionário; coordenação sem entrada aqui é
 # EXCLUÍDA da exportação (nunca exportada com código adivinhado) -- ver aviso no retorno.
-MAPA_CENTRO_SAP = {
-    "Paranapiacaba": {"centro_trabalho": "E.SP.IPA", "centro": "CIPA"},
-    "Piaçaguera": {"centro_trabalho": "E.SP.IPG", "centro": "CIPG"},
-}
+MAPA_CENTRO_SAP = G.MAPA_CENTRO_SAP
 
 def gerar_excel_sap_bytes(df_filtrado_atual: pd.DataFrame) -> tuple[bytes, list[str]]:
     # _status_exportavel_sap (não só _status_prazo | _status_atraso): inclui ABER NRAV, senão a
@@ -1637,10 +1634,7 @@ def preparar_df_visao(df_base: pd.DataFrame, filtro_visao: str) -> pd.DataFrame:
     if col_coord is None: df_visao["Coordenacao"] = "N/D"
     elif col_coord != "Coordenacao": df_visao = df_visao.rename(columns={col_coord: "Coordenacao"})
 
-    _mapa_norm_coord = {
-        "PARANAPIACABA": "Paranapiacaba", "PIAÇAGUERA": "Piaçaguera", "PIACAGUERA": "Piaçaguera",
-        "IPG": "Piaçaguera", "IPA": "Paranapiacaba", "E.SP.IPG": "Piaçaguera", "E.SP.IPA": "Paranapiacaba",
-    }
+    _mapa_norm_coord = G.MAPA_NORM_COORD
 
     # FIX: Limpeza de quebras de linha e espaços duplos escondidos
     def _normalizar_coord(val):
@@ -1938,7 +1932,7 @@ def render_tela_admin():
         * `Atividade ativo` ou `Atividade` *(Ex: EE_INS_SEG_...)*
         * `Prioridade` ou `Criticidade` *(Ex: 1-Muito Alta)*
         * `Data inicial programada` *(Formato: DD/MM/AAAA)*
-        * `Código Departamento` ou `Concatenar` *(Usado para definir se é Piaçaguera ou Paranapiacaba)*
+        * `Código Departamento` ou `Concatenar` *(Usado para definir a coordenação)*
         * `Descrição Longa` *(Opcional - Texto detalhado do serviço)*
 
         #### 2. Planilha de **Baixas em Massa (SAP - IW47)**
@@ -1969,7 +1963,7 @@ def render_tela_admin():
         with col_up_mes: _mes_sel = st.selectbox("Mês de Referência", _meses_pt, index=_hoje_br.month - 1, key="upload_os_mes")
         with col_up_ano: _ano_sel = st.selectbox("Ano", _anos, index=1, key="upload_os_ano")
         mes_ref = f"{_mes_sel}/{_ano_sel}"
-        with col_up2: coord_upload_fallback = st.selectbox("Coordenação (fallback caso a planilha não informe)", ["Paranapiacaba", "Piaçaguera"])
+        with col_up2: coord_upload_fallback = st.selectbox("Coordenação (fallback caso a planilha não informe)", G.NOMES)
 
         arquivo_upload = st.file_uploader("Selecione a planilha Excel ou CSV", type=["csv", "xlsx"], key="upload_os_prog")
         if arquivo_upload is not None and mes_ref:
@@ -2012,7 +2006,7 @@ def render_tela_admin():
                         if not col_depto: col_depto = next((c for c in df.columns if str(c).strip().upper() == "CONCATENAR"), None)
 
                         if col_depto is not None:
-                            df["_coord_auto"] = df[col_depto].apply(lambda v: "Paranapiacaba" if str(v).strip().upper().startswith("E.SP.IPA") else ("Piaçaguera" if str(v).strip().upper().startswith("E.SP.IPG") else None))
+                            df["_coord_auto"] = df[col_depto].apply(G.coord_por_departamento)
                             df = df[df["_coord_auto"].notna()].copy()
                         else: df["_coord_auto"] = coord_upload_fallback
 
@@ -2118,7 +2112,7 @@ def render_tela_admin():
                     df_hist = pd.read_sql_query(query_hist, conn)
                 else:
                     # Filtra pela coordenação do usuário
-                    filtro_coord = escopo_user if escopo_user else "Paranapiacaba"
+                    filtro_coord = escopo_user if escopo_user else G.COORD_PADRAO
                     query_hist = """
                             SELECT coordenacao AS "Coordenação",
                                 MAX(data_upload) AS "Último Upload",
@@ -2170,18 +2164,24 @@ def render_tela_admin():
                     try:
                         xls = pd.ExcelFile(arquivo_mapa, engine="openpyxl")
                         registros = []
-                        if "Ativos_SP" in xls.sheet_names:
-                            df_at = pd.read_excel(xls, sheet_name="Ativos_SP")
+                        # Aba pelo prefixo do nome e pátio pelo cabeçalho "Pátio" (senão, a posição antiga).
+                        _aba = lambda pref: next((a for a in xls.sheet_names if G._chave(a).strip().startswith(pref)), None)
+                        _col_patio = lambda df_, pos: next((i for i, c in enumerate(df_.columns) if G._chave(c).strip() == "PATIO"), pos)
+                        aba_at = _aba("ATIVOS")
+                        if aba_at:
+                            df_at = pd.read_excel(xls, sheet_name=aba_at)
+                            i_patio = _col_patio(df_at, 10)
                             for _, row in df_at.iterrows():
-                                patio = str(row.iloc[10]).strip()
+                                patio = str(row.iloc[i_patio]).strip()
                                 if patio and patio != "nan":
                                     if str(row.iloc[0]).strip() != "nan": registros.append((str(row.iloc[0]).strip(), patio, "Ativo"))
                                     if str(row.iloc[1]).strip() != "nan" and str(row.iloc[1]).strip() != str(row.iloc[0]).strip(): registros.append((str(row.iloc[1]).strip(), patio, "Ativo_Denom"))
-                        for nome_aba in ["Equipamento_SP", "Equipamentos_SP"]:
-                            if nome_aba in xls.sheet_names:
+                        for nome_aba in [_aba("EQUIPAMENTO")]:
+                            if nome_aba:
                                 df_eq = pd.read_excel(xls, sheet_name=nome_aba)
+                                i_patio = _col_patio(df_eq, 6)
                                 for _, row in df_eq.iterrows():
-                                    patio = str(row.iloc[6]).strip()
+                                    patio = str(row.iloc[i_patio]).strip()
                                     if patio and patio != "nan":
                                         if str(row.iloc[0]).strip() != "nan": registros.append((str(row.iloc[0]).strip(), patio, "Equipamento"))
                                         if str(row.iloc[1]).strip() != "nan" and str(row.iloc[1]).strip() != str(row.iloc[0]).strip(): registros.append((str(row.iloc[1]).strip(), patio, "Equipamento_Denom"))
@@ -2388,12 +2388,12 @@ def render_tela_admin():
             * `Ativo` — **obrigatória**. Nome do ativo **exatamente como vem na OS do SAP**
               (maiúsculas/minúsculas e espaços extras não importam; já `IAA A-ABR05-MCH1A` e
               `IAA A-ABR 05 - MCH 1A` são ativos **diferentes**).
-            * `Codigo departamento` — opcional, só para registro (ex.: E.SP.IPG).
+            * `Codigo departamento` — opcional, só para registro.
             * Demais colunas (Atividade Ativo, Data inicial programada, Status...) podem ficar na
               planilha — são ignoradas.
 
             **Regras:**
-            * Todas as abas são lidas (ex.: uma aba por coordenação — IPG, IPA). Aba sem a
+            * Todas as abas são lidas (ex.: uma aba por coordenação). Aba sem a
               coluna `Ativo` é ignorada.
             * Ativo repetido (várias OS do mesmo ativo) conta uma vez só.
             * ⚠️ O envio **SUBSTITUI a lista inteira**: a planilha deve conter **todos** os
@@ -2406,7 +2406,7 @@ def render_tela_admin():
             st.dataframe(
                 pd.DataFrame([{
                     "Atividade Ativo": "EE_INS_CONF_C_I_MAQ CHAVE M2/M3_0180",
-                    "Codigo departamento": "E.SP.IPG",
+                    "Codigo departamento": (G.COORDENACOES[0]["prefixos_depto"] or ["E.XX.XXX"])[0],
                     "Data inicial programada": "06/10/2026",
                     "Status": "ABER",
                     "Status da Operação": "Liberado",
@@ -2460,7 +2460,7 @@ def render_tela_admin():
 
     coord_baixa = st.selectbox(
         "Coordenação",
-        ["Paranapiacaba", "Piaçaguera"],
+        G.NOMES,
         key="coord_baixa_iw47"
     )
 
@@ -2655,15 +2655,7 @@ def render_tela_admin():
         # trazia um código combinado/ambíguo, sobrescrevendo Paranapiacaba (selecionado
         # corretamente no dropdown pelo usuário) por Piaçaguera. Confirmado em 22/07/2026:
         # import de baixas em massa do IPA gravou coordenacao="Piaçaguera" em 3.810 linhas.
-        centro = _normalizar_nome_coluna(valor)
-
-        if centro.startswith("E.SP.IPG") or centro.startswith("PIACAGUERA"):
-            return "Piaçaguera"
-
-        if centro.startswith("E.SP.IPA") or centro.startswith("PARANAPIACABA"):
-            return "Paranapiacaba"
-
-        return coord_fallback
+        return G.coord_por_departamento(valor) or coord_fallback
 
     if arquivo_iw47 and st.button(
         "🚀 Processar Baixas em Massa",
@@ -3139,7 +3131,7 @@ def render_tela_admin():
 
     coord_baixa_napl_fallback = st.selectbox(
         "Coordenação (usada só quando a OS não é encontrada em Programação)",
-        ["Paranapiacaba", "Piaçaguera"],
+        G.NOMES,
         key="coord_baixa_napl_fallback",
     )
 
@@ -3416,7 +3408,7 @@ def render_tela_config_operacional():
     }
     _chave_por_rotulo = {v: k for k, v in _rotulos_criterios.items()}
 
-    coord_sel = st.selectbox("Coordenação", ["Paranapiacaba", "Piaçaguera"], key="config_op_coord_sel")
+    coord_sel = st.selectbox("Coordenação", G.NOMES, key="config_op_coord_sel")
     config_atual = carregar_config_operacional(coord_sel)
 
     conn_status = get_connection()
@@ -3672,9 +3664,7 @@ def render_tela_gestao_usuarios():
         if "msg_sucesso_user" in st.session_state: st.success(st.session_state["msg_sucesso_user"]); del st.session_state["msg_sucesso_user"]
 
         def sedes_por_escopo(escopo: str):
-            if escopo == "Paranapiacaba": return ["Sede IPA"]
-            elif escopo == "Piaçaguera": return ["Sede IPG"]
-            return ["Sede IPA", "Sede IPG"]
+            return G.sedes(escopo)
 
         # "Importação IW47" e "Mapeamento de Ativos" (pedido 31/07/2026): permissões
         # granulares -- liberam só a respectiva seção de render_tela_admin() sem exigir
@@ -3689,7 +3679,7 @@ def render_tela_gestao_usuarios():
             n_user = st.text_input("Matrícula / Username", key="novo_user_login")
             n_nome = st.text_input("Nome do Colaborador", key="novo_user_nome")
             n_perf = st.selectbox("Perfil", ["Técnico", "Assistente", "Coordenador", "Especialista", "Gerência", "Administrador"], key="novo_user_perfil")
-            n_esco = st.selectbox("Escopo (Base)", ["Paranapiacaba", "Piaçaguera", "Todas"], key="novo_user_escopo")
+            n_esco = st.selectbox("Escopo (Base)", G.ESCOPOS, key="novo_user_escopo")
             sedes_validas = sedes_por_escopo(n_esco)
             n_sede = st.selectbox("Sede Física", sedes_validas, key="novo_user_sede", format_func=lambda x: x.replace("Sede ", ""))
             st.markdown("---")
@@ -3748,7 +3738,7 @@ def render_tela_gestao_usuarios():
                     with st.form(f"form_edit_{usr_sel}"):
                         n_nome_edit = st.text_input("Nome do Colaborador", value=str(dados_usr["nome"]).strip() if pd.notna(dados_usr["nome"]) else "")
                         n_perf_edit = st.selectbox("Novo Perfil", ["Técnico", "Assistente", "Coordenador", "Especialista", "Gerência", "Administrador"], index=["Técnico", "Assistente", "Coordenador", "Especialista", "Gerência", "Administrador"].index(dados_usr["perfil"]))
-                        n_esco_edit = st.selectbox("Nova Visão", ["Paranapiacaba", "Piaçaguera", "Todas"], index=["Paranapiacaba", "Piaçaguera", "Todas"].index(dados_usr["escopo"]))
+                        n_esco_edit = st.selectbox("Nova Visão", G.ESCOPOS, index=G.ESCOPOS.index(dados_usr["escopo"]) if dados_usr["escopo"] in G.ESCOPOS else len(G.ESCOPOS) - 1)
                         n_sede_edit = st.selectbox("Sede", sedes_por_escopo(n_esco_edit), format_func=lambda x: x.replace("Sede ", ""))
                         gov_editadas = st.multiselect("Governança:", opcoes_gov, default=[g for g in gov_atual_lista if g in opcoes_gov])
 
@@ -3809,7 +3799,7 @@ def render_tela_gestao_usuarios():
                         else:
                             df_users = df_users.fillna("")
                             perfis_validos = {"Técnico", "Assistente", "Coordenador", "Especialista", "Gerência", "Administrador"}
-                            escopos_validos = {"Paranapiacaba", "Piaçaguera", "Todas"}
+                            escopos_validos = set(G.ESCOPOS)
                             registros, erros = [], []
 
                             for idx, row in df_users.iterrows():
@@ -3945,10 +3935,7 @@ def gerar_html_offline(df_pendentes: pd.DataFrame, usuario: str) -> bytes:
 
     usuarios_json = json.dumps(usuarios_equipe, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
 
-    api_url_fixa = st.secrets.get(
-        "OFFLINE_API_URL",
-        "https://gestao-os-ee-mrs-producao.onrender.com/sincronizar_baixa_offline"
-    )
+    api_url_fixa = st.secrets.get("OFFLINE_API_URL", G.API_URL_PADRAO)
     api_key_fixa = st.secrets.get("OFFLINE_API_KEY", "")
 
     # Trava de prioridade (Muito Alta bloqueia as demais) embutida no momento da publicação
@@ -3957,7 +3944,7 @@ def gerar_html_offline(df_pendentes: pd.DataFrame, usuario: str) -> bytes:
     if "Coordenacao" in df_pendentes.columns and not df_pendentes["Coordenacao"].dropna().empty:
         coordenacao_pacote = str(df_pendentes["Coordenacao"].dropna().mode().iloc[0]).strip()
     else:
-        coordenacao_pacote = "Paranapiacaba"
+        coordenacao_pacote = G.COORD_PADRAO
     trava_prioridade_ativa_pacote = carregar_config_operacional(coordenacao_pacote)["trava_prioridade_ativa"]
 
     # Justificativas do NRAV embutidas como JSON (mesmo padrao de usuarios_json acima) -- fonte
@@ -5429,27 +5416,7 @@ def gerar_html_offline(df_pendentes: pd.DataFrame, usuario: str) -> bytes:
 #region SESSÃO 4: Banco de Coordenadas Fixo
 
 #region 4.1: Coordenadas Fixa
-COORDENADAS_FIXAS = {
-    "FPI": [-23.444413, -46.309269], "IAA": [-23.867675, -46.400270], "IAB": [-23.521338, -46.688570],
-    "IBA": [-23.915135, -46.321495], "ICB": [-23.886147, -46.416167], "ICG": [-23.767863, -46.343114],
-    "ICP": [-23.658495, -46.490753], "ICQ": [-23.91531040683147, -46.41890410191962], "ICR": [-23.640310, -46.323992],
-    "ICZ": [-23.954824, -46.293306], "IEF": [-23.477809, -46.360984], "IES": [-23.545441, -46.603648],
-    "IIP": [-23.564977, -46.604896], "IJN": [-23.195297, -46.870829], "IJU": [-23.889626, -46.338534], 
-    "ILA": [-23.520217, -46.698082], "IMO": [-23.557803, -46.608382], "IOF": [-23.658579, -46.338538],
-    "IPA": [-23.774399, -46.306769], "IPG": [-23.847950, -46.370812], "IPN": [-23.948095774842265, -46.30579661328678], "IPR": [-23.537749, -46.625522],
-    "IQA": [-23.928445, -46.363900], "IQB": [-23.876744, -46.347839], "IQC": [-23.91530182548477, -46.41890965645514], "IRA": [-23.500572, -46.339448], 
-    "IRG": [-23.736705, -46.382241], "IRP": [-23.713578, -46.414862], "IRS": [-23.828162, -46.363101],
-    "ISA": [-23.647553, -46.531007], "ISC": [-23.613874, -46.558834], "ISL": [-23.752383, -46.389262],
-    "ISN": [-23.929330, -46.356448], "ISU": [-23.551210, -46.288671], "IUF": [-23.860615, -46.359726],  
-    "IUT": [-23.624864, -46.544716], "IVP": [-23.848139, -46.390430], "OAR": [-23.500419, -46.339111],
-    "OBF": [-23.525591, -46.666726], "OBR": [-23.545397, -46.616293], "OCE": [-23.484980, -46.481471],
-    "OCV": [-23.525061, -46.333701], "OEG": [-23.498082, -46.519759], "OET": [-23.510887, -46.552273],
-    "OGP": [-23.691962, -46.448784], "OIC": [-23.479040, -46.367395], "OIT": [-23.493970, -46.401392],
-    "OLU": [-23.535423, -46.634503], "OMA": [-23.667910, -46.462083], "OMP": [-23.490530, -46.443668],
-    "OPS": [-23.637494, -46.537198], "OSU": [-23.534010, -46.308025], "OTA": [-23.591863, -46.590075],
-    "OTT": [-23.539844, -46.575501], "ZPD": [-22.363436, -48.711002], "ZPG": [-23.871816, -46.413018],
-    "Sede IPA": [-23.767355, -46.344117], "Sede IPG": [-23.850772, -46.371760]
-}
+COORDENADAS_FIXAS = G.COORDENADAS_FIXAS
 #endregion 4.1
 
 #region 4.2: Configuração Operacional por Coordenação (Plano de Guerra)
@@ -5533,7 +5500,7 @@ def calcular_df_recomendado(df_pendentes_f: pd.DataFrame, lat_origem: float, lon
     elif "Coordenacao" in com_coord.columns and not com_coord["Coordenacao"].dropna().empty:
         coordenacao_rota = str(com_coord["Coordenacao"].dropna().mode().iloc[0]).strip()
     else:
-        coordenacao_rota = "Paranapiacaba"
+        coordenacao_rota = G.COORD_PADRAO
     config_rota = carregar_config_operacional(coordenacao_rota)
 
     # Escopo de dados: quando configurado para um plano específico (ex.: "Julho/2026", escolhido
@@ -5590,12 +5557,6 @@ def obter_base_padrao_usuario():
     username = str(st.session_state.get("username", "")).strip()
     escopo = str(st.session_state.get("escopo", "")).strip()
 
-    mapa_normalizacao = {
-        "Paranapiacaba": ("IPA", "Sede IPA"), "Piaçaguera": ("IPG", "Sede IPG"),
-        "Todas": ("IPA", "Sede Padrão (IPA)"), "ICG": ("ICG", "Campo Grande (ICG)"),
-        "IPA": ("IPA", "Sede IPA"), "IPG": ("IPG", "Base IPG"),
-        "SEDE IPA": ("IPA", "Sede IPA"), "SEDE IPG": ("IPG", "Sede IPG"),
-    }
     valor_base = None
     if username:
         conn = None
@@ -5611,15 +5572,8 @@ def obter_base_padrao_usuario():
             if conn is not None: release_connection(conn)
 
     if not valor_base: valor_base = escopo
-    valor_base = str(valor_base).strip()
-    valor_base_upper = valor_base.upper()
-
-    if valor_base in mapa_normalizacao: chave_coord, nome_exibicao = mapa_normalizacao[valor_base]
-    elif valor_base_upper in mapa_normalizacao: chave_coord, nome_exibicao = mapa_normalizacao[valor_base_upper]
-    else: chave_coord, nome_exibicao = ("IPA", "Base Padrão (IPA)")
-
-    coord = COORDENADAS_FIXAS.get(chave_coord, COORDENADAS_FIXAS["IPA"])
-    return float(coord[0]), float(coord[1]), nome_exibicao
+    lat, lon, nome_exibicao = G.base_padrao(valor_base)
+    return float(lat), float(lon), nome_exibicao
 #endregion SESSÃO 4
 #endregion
 
@@ -5669,7 +5623,7 @@ def tratar_df_os(df: pd.DataFrame):
     )
     
     _mapa_patios = carregar_mapeamento_patios()
-    _patios_validos = set(k for k in COORDENADAS_FIXAS.keys() if not k.startswith("Sede"))
+    _patios_validos = set(G.PATIOS)
 
     def _resolver_patio(ativo_str: str) -> str:
         ativo_upper = str(ativo_str).strip().upper()
@@ -5742,10 +5696,7 @@ def tratar_df_os(df: pd.DataFrame):
 # Normalização de nome de coordenação usada no ETL e no recorte por escopo (antes era um
 # dict local de carregar_base_sem_overlay; virou constante em 15/10/2026 porque o recorte
 # por escopo agora é feito fora do ETL, em _recortar_base_escopo).
-_MAPA_NORM_COORD_BASE = {
-    "PARANAPIACABA": "Paranapiacaba", "PIAÇAGUERA": "Piaçaguera", "PIACAGUERA": "Piaçaguera",
-    "IPG": "Piaçaguera", "IPA": "Paranapiacaba", "E.SP.IPG": "Piaçaguera", "E.SP.IPA": "Paranapiacaba",
-}
+_MAPA_NORM_COORD_BASE = G.MAPA_NORM_COORD
 
 _SQL_OS_PROGRAMADAS = "SELECT os, coordenacao, dados_completos, data_upload, mes_referencia FROM os_programadas"
 
@@ -5767,8 +5718,6 @@ def _etl_os_programadas(df_raw_db: pd.DataFrame) -> pd.DataFrame:
             .drop(columns="_dt_ord")
         )
 
-    _mapa_depto_fallback = {"E.SP.IPA": "Paranapiacaba", "E.SP.IPG": "Piaçaguera"}
-
     def _resolver_coord_null(row):
         coord = row["coordenacao"]
         if pd.notna(coord) and str(coord).strip() != "": return str(coord).strip()
@@ -5779,9 +5728,8 @@ def _etl_os_programadas(df_raw_db: pd.DataFrame) -> pd.DataFrame:
         if isinstance(dados, dict):
             for chave in ["Codigo departamento", "CODIGO DEPARTAMENTO", "Concatenar", "CONCATENAR"]:
                 val = str(dados.get(chave, "")).strip().upper()
-                if val:
-                    for prefixo, coord_nome in _mapa_depto_fallback.items():
-                        if val.startswith(prefixo): return coord_nome
+                c = G.coord_por_departamento(val)
+                if c: return c
         return "N/D"
 
     df_raw_db["coordenacao"] = df_raw_db.apply(_resolver_coord_null, axis=1)
@@ -6221,7 +6169,7 @@ is_tecnico = st.session_state.get("perfil") == "Técnico"
 if "Painel Gerencial" in gov_usuario and not is_tecnico:
     visao_selecionada = st.sidebar.radio(
         "Selecione a Visão:", 
-        ["Gerência", "Paranapiacaba", "Piaçaguera"], 
+        ["Gerência"] + G.NOMES, 
         label_visibility="collapsed", 
         key="radio_visao_gerencial"
     )
