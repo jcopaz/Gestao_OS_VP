@@ -79,13 +79,13 @@ Duas frentes de trabalho:
 
 ---
 
-## 📌 Estado atual (05/09/2026)
+## 📌 Estado atual (instância Vale do Paraíba — 12/11/2026)
 
-- **App:** em produção — painel Streamlit em **Streamlit Community Cloud** (`sgomrs.streamlit.app`, Python 3.12) + API FastAPI em **Render** (`gestao-os-ee-mrs-producao.onrender.com`) · Banco Neon · Storage Cloudflare R2 (Supabase Storage removido em 15/10/2026). São **duas hospedagens diferentes**, cada push no `main` redeploya as duas.
-- **Versão em produção:** **v19.0.x** — reconciliação de 04/09 (base v18.2.0 + correções de datas + parser de Data Inicial Programada + flag da Agenda Mensal) depois do rollback de 02/09. Tag `estavel-2026-09-05`.
-- **Configurações Operacionais** por coordenação (geofence/trava/escopo/ordem, vigência automática **+ toggle "sem expiração / novo padrão"**): **em produção**.
-- **Deck:** v11 concluído (13/07/2026).
-- **Pendências:** hospedagem corporativa MRS + SSO/AD (contato: Bruno Capobiango); `requirements.txt` pina `streamlit==1.32.0` mas o código usa `@st.fragment` (≥1.37) — conferir a versão real e corrigir o pin; branch `dev` desatualizada numa linha própria (reconciliar antes de usar).
+- **Instância:** SGO da Gerência Vale do Paraíba (3 coordenações), clonado do SGO da Baixada Santista. Repositório `Gestao_OS_VP` (GitHub a criar, conta do Julio). Streamlit Community Cloud e GitHub na conta do Julio; **contas próprias** de Neon, Render e Cloudflare R2 (e-mail dedicado do projeto). Dados ainda **provisórios**.
+- **Dados da gerência** (coordenações, prefixos/centros SAP, sedes, pátios, limites do mapa) ficam em `gerencia.py`, com placeholders até o kit `Documentos\Python\SGO_Vale_Paraiba\SGO_VP_Kit_de_Dados.xlsx` voltar preenchido. Não reintroduzir valores fixos em `app.py`/`api.py`.
+- **Correções da Baixada** entram por `git fetch baixada` + `git cherry-pick` (o remote `baixada` tem push bloqueado).
+- **Secrets necessários:** Streamlit = `NEON_POSTGRES_URL`, `AUTH_TOKEN_SECRET`, `OFFLINE_API_URL`, `OFFLINE_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_URL`, `R2_BUCKET`, `ADMIN_SENHA_INICIAL` (opcional) · Render = `NEON_POSTGRES_URL`, `API_KEY_SECRET`, `R2_*` · GitHub = variável `API_BASE_URL` e secret `OFFLINE_API_KEY`.
+- **Pendências:** `requirements.txt` pina `streamlit==1.32.0` mas o código usa `@st.fragment` (≥1.37) — conferir a versão real e corrigir o pin.
 
 ---
 

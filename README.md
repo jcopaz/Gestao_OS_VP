@@ -37,6 +37,8 @@ SAP  →  Motor SGO  →  Campo  →  Banco / Evidências  →  Retorno SAP
 
 ---
 
+> Os dados da gerência (coordenações, prefixos SAP, sedes, pátios) ficam em `gerencia.py`.
+
 ## 💻 Stack tecnológica
 
 | Camada | Tecnologia |
@@ -44,7 +46,7 @@ SAP  →  Motor SGO  →  Campo  →  Banco / Evidências  →  Retorno SAP
 | Frontend / Painel | Streamlit (+ ECharts, Folium) |
 | Motor Antifraude / API | FastAPI (Render) |
 | Banco de dados | PostgreSQL (Neon) |
-| Storage de fotos | Supabase Storage |
+| Storage de fotos | Cloudflare R2 |
 | Modo Offline | PWA + IndexedDB |
 | Segurança | HTTPS + API Key · token HMAC na URL |
 | Geolocalização | GPS HTML5 + Haversine |
