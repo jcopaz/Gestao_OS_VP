@@ -6,6 +6,7 @@
 !api.py
 !storage_evidencias.py
 !gerencia.py
+!test_gerencia.py
 !requirements.txt
 !logo_mrs.png
 !malha_mrs.kml

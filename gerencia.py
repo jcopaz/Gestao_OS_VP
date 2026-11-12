@@ -73,9 +73,11 @@ for _c in COORDENACOES:
             MAPA_NORM_COORD[_chave(_apelido)] = _c["nome"]
 
 # (prefixo normalizado, nome) do mais longo para o mais curto -- startswith, nunca substring.
+# O nome da coordenação só vale como prefixo quando ela já tem prefixo SAP configurado
+# (a IW47 antiga aceitava "PARANAPIACABA..."); placeholder sem prefixo falha fechado.
 _PREFIXOS = sorted(
     {(_chave(p), c["nome"]) for c in COORDENACOES
-     for p in [*c["prefixos_depto"], c["centro_trabalho"], c["nome"]] if p},
+     for p in [*c["prefixos_depto"], c["centro_trabalho"], c["nome"] if c["prefixos_depto"] else None] if p},
     key=lambda x: len(x[0]), reverse=True,
 )
 

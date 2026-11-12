@@ -455,12 +455,18 @@ def init_db():
             print(f"[init_db] Falha ao preparar schema parametros: {e_param}")
 
         # Criar o admin mestre se não existir
+        # Sem senha padrão (revisão Codex 12/11/2026): o admin só nasce com o secret
+        # ADMIN_SENHA_INICIAL definido -- nunca com uma senha pública tipo mrs123.
+        _senha_admin = str(st.secrets.get("ADMIN_SENHA_INICIAL", "")).strip()
         cur.execute("SELECT COUNT(*) FROM usuarios")
-        if cur.fetchone()[0] == 0:
+        _sem_usuarios = cur.fetchone()[0] == 0
+        if _sem_usuarios and not _senha_admin:
+            print("[init_db] Banco sem usuários: defina o secret ADMIN_SENHA_INICIAL para criar o admin.")
+        if _sem_usuarios and _senha_admin:
             cur.execute("""
                 INSERT INTO usuarios (username, nome, senha_hash, perfil, escopo, reset_obrigatorio, governanca) 
                 VALUES (%s, %s, %s, %s, %s, 1, %s)
-            """, ('admin', 'Administrador do Sistema', hash_senha(str(st.secrets.get('ADMIN_SENHA_INICIAL', 'mrs123'))), 'Gerência', 'Todas', 'Painel Gerencial,Mapa de Campo,Upload de Dados,Gestão de Usuários'))
+            """, ('admin', 'Administrador do Sistema', hash_senha(_senha_admin), 'Gerência', 'Todas', 'Painel Gerencial,Mapa de Campo,Upload de Dados,Gestão de Usuários'))
             
         conn.commit()
         cur.close()
@@ -2406,7 +2412,7 @@ def render_tela_admin():
             st.dataframe(
                 pd.DataFrame([{
                     "Atividade Ativo": "EE_INS_CONF_C_I_MAQ CHAVE M2/M3_0180",
-                    "Codigo departamento": (G.COORDENACOES[0]["prefixos_depto"] or ["E.XX.XXX"])[0],
+                    "Codigo departamento": (G.COORDENACOES[0]["prefixos_depto"] or ["(prefixo SAP da coordenação)"])[0],
                     "Data inicial programada": "06/10/2026",
                     "Status": "ABER",
                     "Status da Operação": "Liberado",
