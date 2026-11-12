@@ -15,6 +15,8 @@
 | **Fix PWA offline (Limpar Filas)** | 13/07/2026 | "Limpar Filas e Reiniciar" apagava também o histórico de sincronizadas, fazendo OS já baixadas reaparecerem na lista offline |
 | **Configurações Operacionais (Plano de Guerra)** | 13/07/2026 | Nova tela admin: geofence, trava de Muito Alta, escopo de dados e ordem de priorização configuráveis **por coordenação**, com vigência automática. Desenvolvida na branch `dev` |
 | **Apresentação v11** | 13/07/2026 | Atualiza slide "Motor de Priorização" (modelo Segurança da Operação) + novo item de Configurações Operacionais |
+| **Trava do starlette** | 12/11/2026 | Logo da sidebar e `/media` com erro 500 (starlette 1.8+ quebra o gzip do Streamlit 1.5x) → `starlette<1.8` (ver 09) |
+| **Turno por letra** | 11/2026 | Acompanhamento por turno deixa de ser pelo horário da baixa e passa a ser pela letra da escala (A/B/C/D/Administrativo) do executor na data — histórico com vigência, confirmação mensal, edição na Gestão de Usuários |
 
 ---
 

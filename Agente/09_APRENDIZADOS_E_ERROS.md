@@ -524,6 +524,14 @@ Primeira execução real do `/limpar_evidencias_orfas` (endpoint criado nesta me
 3. **Nunca `st.cache_*.clear()` global em caminho de erro/reconexão**: limpar só o que de fato ficou inválido.
 4. Binário (base64) em coluna de tabela lida com frequência multiplica o egress a cada leitura.
 
+## 12/11/2026 — Logo da sidebar sumiu (e /media + estáticos com erro 500) — starlette 1.8+ sem pin
+
+**Sintoma:** a logo MRS parou de aparecer na sidebar do SGO SP e do SGO VP. Nenhum commit tinha mexido na logo (código igual desde 09/07).
+**Causa raiz:** o Streamlit 1.5x passou a usar **starlette** como servidor web e só declara `starlette>=0.40.0`, sem teto. O `requirements.txt` travava `streamlit>=1.37,<1.60` mas **não** o starlette; um reboot da nuvem instalou o starlette 1.10.0. Do 1.8 em diante o `GZipResponder` mudou e o `MediaAwareGZipResponder` do Streamlit (que trata o `http.response.start` por conta própria) deixa de repassar o início da resposta → `RuntimeError: Expected ASGI message 'http.response.start', but got 'http.response.body'` → **HTTP 500 em `/media/...` (`st.image` e, provavelmente, `st.download_button`) e nos arquivos estáticos pequenos (`/favicon.png`)**. A logo era só o sintoma visível.
+**Como foi provado:** `/favicon.png` do app de produção (`sgomrs.streamlit.app/~/+/favicon.png`) respondia 500; mini-app local só com `st.sidebar.image` aberto no Edge via CDP: `naturalWidth=0` e o fetch da imagem = 500. Matriz com Streamlit 1.59.2: starlette 0.52.1 / 1.0.0 / 1.3.1 / 1.6.0 / **1.7.0 OK**; **1.8.0 e 1.10.0 quebram**. Trocar o anyio ou voltar o Streamlit para 1.58 não resolvia. FastAPI 0.162 (API do Render) roda com starlette 1.7.0.
+**Correção:** `starlette>=0.46,<1.8` no `requirements.txt` (SP `75dd3c8`, VP `9aa859c`) + padrão de dependências em `05_PADROES_TECNICOS.md`.
+**Como validar após qualquer reboot/deploy:** abrir `<app>/~/+/favicon.png` (Streamlit Cloud) — tem que dar 200; a logo aparece na sidebar.
+
 ---
 
 ## Lições transversais (válidas pra qualquer mudança futura)
@@ -534,7 +542,7 @@ Primeira execução real do `/limpar_evidencias_orfas` (endpoint criado nesta me
 - **Fala informal em reunião não é especificação técnica** — qualquer parâmetro numérico/regra de negócio citado informalmente precisa de validação explícita antes de virar constraint no código.
 - **Mudança em comportamento de renderização de widget (mesmo com API oficial) precisa de teste real antes de produção** — não só validação de sintaxe/lógica.
 - **Métrica agregada zerada ou anômala é sinal de alerta prioritário**, mesmo sem erro explícito reportado ainda.
-- **Dependências sem pin de versão são risco de infraestrutura silencioso** — travar sempre, principalmente libs com binário nativo.
+- **Dependências sem pin de versão são risco de infraestrutura silencioso** — travar sempre, principalmente libs com binário nativo. **Vale também para dependência transitiva crítica:** travar o pacote de cima (Streamlit) não trava o que ele puxa sem teto (starlette, incidente 12/11/2026). Ao subir versão de framework, olhar o `Requires-Dist` dele.
 - **Chave de conflito (`ON CONFLICT`/`UNIQUE`) de qualquer tabela ligada a uma execução específica deve usar o identificador único de verdade**, nunca uma combinação de campos descritivos que podem se repetir.
 - **Nunca usar substring solta (`"X" in campo`) pra decidir coordenação/escopo/permissão** — sempre prefixo ou valor exato.
 - **Toda coluna nova adicionada a uma função `@st.cache_data` exige incrementar a versão do cache** (`ETL_VERSION`) no mesmo commit.

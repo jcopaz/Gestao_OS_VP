@@ -157,6 +157,17 @@ st.query_params.clear()
 
 ---
 
+## 🕐 Padrão de Turno (por LETRA da escala — 11/2026)
+
+- **Turno de uma OS concluída = letra que o executor principal (`baixas.concluido_por`, matrícula) tinha NA DATA da baixa.** Categorias: `Turno A`, `Turno B`, `Turno C`, `Turno D`, `Administrativo`; `Sem turno` = concluída por matrícula sem letra cadastrada; `Pendente (Sem Turno)` = OS não concluída (só no filtro). Co-executores (`equipe`) **não** contam.
+- ❌ **Não** reintroduzir classificação por horário (`classificar_turno`, "Turno Dia 07h-19h", "Noite", "Administrativo 08h-17h30") — removida de propósito.
+- Constantes e lookup ficam em **`turnos.py`** (puro, sem Streamlit; teste em `test_turnos.py`). Gráficos/filtros/PDF usam `TURNOS`, `TURNOS_EIXO`, `COR_TURNO`, `TURNO_CURTO` — nunca listas literais.
+- Histórico em **`turno_historico(username, turno, vigente_desde)`**, PK `(username, vigente_desde)`. O **1º registro** de cada matrícula vale desde `2000-01-01` (OS antigas contam para a letra atual); trocas posteriores valem a partir da data informada. Gravar só via `_registrar_turno_cur` (mesmo cursor/transação de quem chama) e depois `_ler_turno_historico.clear()`.
+- O turno é **calculado na leitura** (`preparar_df_visao` recebe o histórico como argumento → o cache recalcula quando o histórico muda). Nada muda na baixa, no PWA, na IW47, no NAPL nem na API.
+- **Confirmação mensal:** no 1º acesso do mês, quem tem "Mapa de Campo" responde "Seu turno continua sendo X?" (`st.dialog` bloqueante; erro de banco não bloqueia). Confirmação em `usuarios.turno_confirmado_mes` (`AAAA-MM`). Quem só usa o PWA não vê o diálogo — a letra vem da carga inicial / Gestão de Usuários.
+- **Carga/ajuste:** Gestão de Usuários (editar: letra + "Válido a partir de"; criar: letra opcional) e cadastro em massa (coluna opcional `turno`; planilha só com `username` + `turno` = carga de letras, aceita matrícula sem login no SGO). **Reenviar a planilha corrige a letra inicial** (sobrescreve o registro "desde sempre") enquanto a matrícula não tiver troca de escala registrada; depois disso, sem data = troca a partir de hoje.
+- Barra "Sem turno" alta = matrícula executando sem letra cadastrada (ex.: baixas de IW47 de quem não está no SGO) → cadastrar a letra.
+
 ## 📦 Padrão de Dependências (`requirements.txt`)
 
 - **Sempre travar versões** (`>=x,<y`), nunca deixar solto. Sem pin, todo reboot no Streamlit Cloud reinstala a versão mais recente de tudo via `uv`/`pip`, podendo quebrar o processo em produção sem nenhum commit novo (aconteceu em 10/07/2026: `numpy 2.x` solto causou `Segmentation fault`).

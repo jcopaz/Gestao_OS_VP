@@ -1644,6 +1644,12 @@ def _registrar_turno_cur(cur, username, turno, vigente_desde=None, registrado_po
     linhas = cur.fetchall()
     if not linhas:
         data = DATA_DESDE_SEMPRE
+    elif vigente_desde is None and all(pd.Timestamp(v).date() == DATA_DESDE_SEMPRE for _, v in linhas):
+        # Sem data + só a letra inicial gravada = correção da carga inicial (planilha de turno
+        # reenviada): sobrescreve a letra "desde sempre" em vez de abrir uma troca hoje
+        # (revisão Codex 12/11/2026). Troca de escala real passa data (edição/diálogo mensal).
+        data = DATA_DESDE_SEMPRE
+        if linhas[0][0] == turno: return False
     else:
         data = pd.Timestamp(vigente_desde or agora_dt().date()).date()
         anteriores = [(pd.Timestamp(v).date(), t) for t, v in linhas if pd.Timestamp(v).date() <= data]
@@ -6204,14 +6210,19 @@ except TypeError: _dlg_turno = st.dialog("Confirmação mensal de turno")
 
 def _salvar_turno_mensal(novo, mes):
     usr = st.session_state.get("username", "")
-    conn = get_connection()
     try:
-        cur = conn.cursor()
-        if novo: _registrar_turno_cur(cur, usr, novo, agora_dt().date(), usr)
-        cur.execute("UPDATE usuarios SET turno_confirmado_mes=%s WHERE username=%s", (mes, usr))
-        conn.commit(); cur.close()
-    finally:
-        release_connection(conn)
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            if novo: _registrar_turno_cur(cur, usr, novo, agora_dt().date(), usr)
+            cur.execute("UPDATE usuarios SET turno_confirmado_mes=%s WHERE username=%s", (mes, usr))
+            conn.commit(); cur.close()
+        finally:
+            release_connection(conn)
+    except Exception as e:  # falha de banco: mensagem amigável e nova tentativa, sem traceback
+        print(f"⚠️ salvar turno mensal: {e}")
+        st.error("Não foi possível salvar agora. Tente novamente em instantes.")
+        return
     _ler_turno_historico.clear()
     st.session_state["_turno_mes_ok"] = mes
     st.session_state.pop("_turno_mudou", None)

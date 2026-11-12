@@ -67,6 +67,19 @@ Lida por `carregar_config_operacional(coordenacao)` — duplicada em `app.py` e 
 
 ---
 
+## 🕐 Tabela `turno_historico` (turno por letra)
+
+| Campo | Significado |
+|---|---|
+| `username` | Matrícula do colaborador (mesmo valor de `baixas.concluido_por`); sem FK para `usuarios` de propósito (executor de IW47 sem login também tem letra) |
+| `turno` | `Turno A` · `Turno B` · `Turno C` · `Turno D` · `Administrativo` |
+| `vigente_desde` | Data a partir da qual a letra vale (1º registro = `2000-01-01`) |
+| `registrado_por` / `registrado_em` | Quem gravou e quando (auditoria) |
+
+`usuarios.turno_confirmado_mes` (`AAAA-MM`) = último mês em que o colaborador confirmou a letra no diálogo mensal. Regras em `05_PADROES_TECNICOS.md` → Padrão de Turno.
+
+---
+
 ## 🔑 Chaves técnicas
 
 | Chave | Significado |
