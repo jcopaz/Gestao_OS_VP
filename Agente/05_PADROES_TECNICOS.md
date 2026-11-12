@@ -163,6 +163,8 @@ st.query_params.clear()
 - **`geopandas` deve ser `>=1.0`** — versões `<1.0` dependem de `fiona`, que exige compilar contra `GDAL` nativo (`gdal-config`), indisponível no build do Streamlit Cloud (sem `apt`/`packages.txt`). `geopandas>=1.0` usa `pyogrio` (wheel pré-compilada, sem GDAL do sistema).
 - **Python do Streamlit Cloud fixado em 3.12** (Settings → General → Python version). Versões muito novas (ex.: 3.14) não têm wheel pronta pra `pandas`/`shapely`/`pyogrio`, forçando build do zero (lento/instável).
 - Combo validado em 10/07/2026: `numpy>=1.26,<2` · `pandas>=2.1,<2.3` · `geopandas>=1.0,<2` · `shapely>=2.0,<3` · `pyogrio` · `streamlit>=1.32,<2` · Python 3.12.
+- **`starlette` travado em `>=0.46,<1.8`** (12/11/2026). O Streamlit 1.5x usa starlette como servidor web e só exige `starlette>=0.40`, sem teto; o starlette 1.8+ mudou o `GZipResponder` e o Streamlit passou a responder **500 em `/media` e nos arquivos estáticos** — logo da sidebar sumiu, `favicon.png` 500, e o mesmo vale para `st.image`/`st.download_button`. Validado: Streamlit 1.59.2 + starlette 1.7.0 OK; 1.8.0 e 1.10.0 quebram. Teste rápido: `/favicon.png` do app tem que dar 200.
+- Combo em produção (12/11/2026): `streamlit 1.59.2` · `starlette 1.7.0` · `fastapi 0.162.x` · Python 3.12.
 
 ---
 

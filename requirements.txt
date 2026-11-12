@@ -1,5 +1,7 @@
 requests
 streamlit>=1.37,<1.60
+# starlette 1.8+ quebra o gzip do servidor do Streamlit 1.5x: /media e arquivos estaticos dao 500 (logo, downloads). Validado 1.7.0 em 12/11/2026.
+starlette>=0.46,<1.8
 pandas>=2.1,<2.3
 numpy>=1.26,<2
 folium

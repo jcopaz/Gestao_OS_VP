@@ -86,4 +86,4 @@ O agente atua em **duas frentes**:
 - **Dados da gerência** (coordenações, prefixos/centros SAP, sedes, pátios, limites do mapa) ficam em `gerencia.py`, com placeholders até o kit `Documentos\Python\SGO_Vale_Paraiba\SGO_VP_Kit_de_Dados.xlsx` voltar preenchido. Não reintroduzir valores fixos em `app.py`/`api.py`.
 - **Correções da Baixada** entram por `git fetch baixada` + `git cherry-pick` (o remote `baixada` tem push bloqueado).
 - **Secrets necessários:** Streamlit = `NEON_POSTGRES_URL`, `AUTH_TOKEN_SECRET`, `OFFLINE_API_URL`, `OFFLINE_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_URL`, `R2_BUCKET`, `ADMIN_SENHA_INICIAL` (obrigatório no 1º deploy: sem ele o admin não é criado) · Render = `NEON_POSTGRES_URL`, `API_KEY_SECRET`, `R2_*` · GitHub = variável `API_BASE_URL` e secret `OFFLINE_API_KEY`.
-- **Pendências:** `requirements.txt` pina `streamlit==1.32.0` mas o código usa `@st.fragment` (≥1.37) — conferir a versão real e corrigir o pin.
+- **Pendências:** `requirements.txt`: `streamlit>=1.37,<1.60` + `starlette<1.8` (starlette 1.8+ dá 500 em /media e estáticos — ver 05_PADROES_TECNICOS).
