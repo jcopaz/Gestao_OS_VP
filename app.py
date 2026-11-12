@@ -38,6 +38,7 @@ from psycopg2 import pool
 
 import storage_evidencias
 import gerencia as G  # dados da gerência (coordenações, SAP, sedes, pátios)
+from turnos import TURNOS, TURNO_SEM, TURNO_PENDENTE, TURNOS_EIXO, COR_TURNO, TURNO_CURTO, DATA_DESDE_SEMPRE, normalizar_turno, atribuir_turno  # turno por letra
 #endregion 1.1
 
 #region 1.2: Configurações Globais e Estilo Corporativo (Com Imagem)

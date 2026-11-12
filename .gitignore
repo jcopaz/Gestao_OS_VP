@@ -7,6 +7,8 @@
 !storage_evidencias.py
 !gerencia.py
 !test_gerencia.py
+!turnos.py
+!test_turnos.py
 !requirements.txt
 !logo_mrs.png
 !malha_mrs.kml
