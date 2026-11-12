@@ -7498,7 +7498,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                         & (df_coord["dt_realizado"] <= _agora_naive)
                     )
                     df_24h = df_coord[_mask_24h]
-                    _turnos_24h = ["Turno Dia (07h-19h)", "Administrativo (08h-17h30)", "Turno Noite (19h-07h)"]
+                    _turnos_24h = TURNOS_EIXO
                     _cores_24h = {
                         ("Segurança", "Com Intervalo"): "#DC2626", ("Segurança", "Sem Intervalo"): "#FCA5A5",
                         ("Confiabilidade", "Com Intervalo"): "#1D4ED8", ("Confiabilidade", "Sem Intervalo"): "#60A5FA",
@@ -7529,7 +7529,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                                     "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
                                     "legend": {"bottom": "0%", "data": _legend_24h, "textStyle": {"fontSize": 9}},
                                     "grid": {"left": "8%", "right": "4%", "top": "6%", "bottom": "18%", "containLabel": True},
-                                    "xAxis": {"type": "category", "data": [t.split(" (")[0] for t in _turnos_24h], "axisLabel": {"interval": 0, "fontSize": 10}},
+                                    "xAxis": {"type": "category", "data": [TURNO_CURTO.get(t, t) for t in _turnos_24h], "axisLabel": {"interval": 0, "fontSize": 10}},
                                     # minInterval:1 -- contagem de OS e sempre inteira, sem isso o
                                     # ECharts as vezes escolhe passo fracionado (2.5, 7.5...) quando
                                     # o range e pequeno, o que fica estranho pra numero de OS.
@@ -7698,13 +7698,13 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
 #region 10.2.3: Execução por Turno e Acumulado
                 with st.expander("Execução por Turno e Acumulado", expanded=True):
                     col_g3, col_g6 = st.columns(2)
-                    _cor_turno = { "Turno Dia (07h-19h)": "#F59E0B", "Administrativo (08h-17h30)": "#3B82F6", "Turno Noite (19h-07h)": "#4F46E5" }
+                    _cor_turno = COR_TURNO
                     with col_g3:
                         st.markdown("#### Realizado por Turno")
-                        x_turnos = ["Turno Dia (07h-19h)", "Administrativo (08h-17h30)", "Turno Noite (19h-07h)"]
+                        x_turnos = TURNOS_EIXO
                         _cnt_t = df_visao_base[df_visao_base["Status_norm"].isin(_status_concluida_dashboard)].groupby("Turno").size()
                         y_vals = [int(_cnt_t.get(t, 0)) for t in x_turnos]
-                        # Representatividade: % que o turno representa do total Realizado (soma dos 3 turnos).
+                        # Representatividade: % que o turno representa do total Realizado (soma dos turnos).
                         _total_turnos = sum(y_vals)
                         data_turno = [
                             {
@@ -7717,7 +7717,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                             for t, v in zip(x_turnos, y_vals)
                         ]
                         st_echarts(options={
-                            "tooltip": {"trigger": "axis"}, "xAxis": {"type": "category", "data": x_turnos, "axisLabel": {"interval": 0, "fontSize": 10}}, "yAxis": {"type": "value"},
+                            "tooltip": {"trigger": "axis"}, "xAxis": {"type": "category", "data": [TURNO_CURTO.get(t, t) for t in x_turnos], "axisLabel": {"interval": 0, "fontSize": 10}}, "yAxis": {"type": "value"},
                             "toolbox": {"show": True, "feature": {"magicType": {"type": ["line", "bar"], "title": {"line": "Linha", "bar": "Barra"}}, "restore": {"title": "Restaurar"}, "saveAsImage": {"title": "Salvar Imagem"}}},
                             "grid": {"left": "5%", "right": "5%", "bottom": "15%", "top": "15%", "containLabel": True},
                             "series": [{"type": "bar", "barWidth": "55%", "data": data_turno}],
@@ -7967,7 +7967,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                                 ax.text(_x[i], _bottom[i] + _v / 2, str(int(_v)), ha="center", va="center", fontsize=6.5, color="white", fontweight="bold")
                         _bottom = [b + v for b, v in zip(_bottom, _vals)]
                     ax.set_xticks(_x)
-                    ax.set_xticklabels([t.split(" (")[0] for t in turnos], fontsize=8)
+                    ax.set_xticklabels([TURNO_CURTO.get(t, t) for t in turnos], fontsize=8)
                     # Espaco extra no topo pra barra alta nao empurrar a legenda em cima do
                     # numero da ultima fatia -- legenda embaixo (nao "upper right" dentro do
                     # grafico), que colidia com a barra do Turno Noite.
@@ -8002,7 +8002,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                         & (_df_c["dt_realizado"] >= _cutoff_png) & (_df_c["dt_realizado"] <= _agora_png)
                     )
                     _df24_png = _df_c[_mask_24h_png]
-                    _turnos_png = ["Turno Dia (07h-19h)", "Administrativo (08h-17h30)", "Turno Noite (19h-07h)"]
+                    _turnos_png = TURNOS_EIXO
 
                     def _dados_turno_coord(coord_nome):
                         _d_coord = _df24_png[_df24_png["Coordenacao"] == coord_nome]
@@ -8439,7 +8439,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                             st.markdown(f"<div style='margin-bottom: 16px;'></div><div class='kpi-wrapper kpi-card-red'><div class='kpi-title-red'>Pátio Prioritário</div><div class='kpi-val-red'>{resumo_card['patio_prioritario']}</div><div class='kpi-sub-red'>Critério: backlog + prioridade</div></div>", unsafe_allow_html=True)
 
                         with col_turno:
-                            _cor_turno_aba2 = { "Turno Dia (07h-19h)": "#F59E0B", "Administrativo (08h-17h30)": "#3B82F6", "Turno Noite (19h-07h)": "#4F46E5" }
+                            _cor_turno_aba2 = COR_TURNO
                             dados_formatados_turno = [{"value": val, "itemStyle": { "color": _cor_turno_aba2.get(lbl, "#3B82F6"), "borderRadius": [0, 6, 6, 0] }} for lbl, val in zip(resumo_turno["labels"], resumo_turno["valores"])]
                 else:
                     st.info("ℹ️ Nenhuma OS encontrada para os filtros selecionados (Data, Pátio ou Tipo de Intervalo). Modifique os filtros para exibir a agenda.")
