@@ -409,6 +409,23 @@ def init_db():
                 conn.commit()
             except Exception: conn.rollback()
 
+        # Turno por letra (12/11/2026): histórico da letra (Turno A/B/C/D/Administrativo) de
+        # cada matrícula; a letra de uma OS é a vigente do executor na data da baixa. Sem FK
+        # para usuarios de propósito (carga de turno pode vir antes do cadastro e excluir o
+        # usuário não apaga o histórico). turno_confirmado_mes = AAAA-MM da última confirmação
+        # mensal do próprio usuário. Commit próprio.
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS turno_historico (
+                    username VARCHAR(255) NOT NULL, turno VARCHAR(20) NOT NULL, vigente_desde DATE NOT NULL,
+                    registrado_por VARCHAR(255), registrado_em TIMESTAMP DEFAULT NOW(),
+                    PRIMARY KEY (username, vigente_desde));
+            """)
+            cur.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS turno_confirmado_mes VARCHAR(7);")
+            conn.commit()
+        except Exception as e:
+            conn.rollback(); print(f"⚠️ init_db turno_historico: {e}")
+
         # Parâmetros de ativos (BASE 2, pedido 27/10/2026): schema SEPARADO das tabelas do
         # apontamento. ativos_habilitados = quais ativos mostram os campos (lista da BASE 2,
         # substituível na tela Dados); medicoes = uma linha por ativo medido, independente de
@@ -1597,27 +1614,47 @@ def parse_datahora_realizado(valor):
     if not s: return pd.NaT
     return pd.to_datetime(s, dayfirst=True, errors="coerce")
 
-def classificar_turno(dt):
-    if pd.isna(dt): return None
-    h = int(dt.hour)
-    m = int(dt.minute)
-    wd = dt.weekday() # 0=Seg, 1=Ter, ..., 5=Sab, 6=Dom
-    
-    # 1. Turno Noite: Todos os dias das 19h as 06h59
-    if h >= 19 or h < 7:
-        return "Turno Noite (19h-07h)"
-        
-    # 2. Dias de Semana (Segunda a Sexta)
-    if wd < 5:
-        # Administrativo: 08:00 as 17:30
-        if (h > 8 and h < 17) or (h == 8) or (h == 17 and m <= 30):
-            return "Administrativo (08h-17h30)"
-        else:
-            # Janelas do Revezamento Dia durante a semana (07h as 07h59 e 17h31 as 18h59)
-            return "Turno Dia (07h-19h)"
+@st.cache_data(show_spinner=False, ttl=3600)
+def _ler_turno_historico() -> pd.DataFrame:
+    conn = get_connection()
+    try:
+        return pd.read_sql_query("SELECT username, turno, vigente_desde FROM turno_historico", conn)
+    finally:
+        release_connection(conn)
+
+def carregar_turno_historico() -> pd.DataFrame:
+    """Histórico de letras (cache 1h); erro de banco -> vazio (todas as OS caem em 'Sem turno')."""
+    try:
+        return _ler_turno_historico()
+    except Exception as e:
+        print(f"⚠️ carregar_turno_historico: {e}")
+        return pd.DataFrame(columns=["username", "turno", "vigente_desde"])
+
+def turno_vigente(username, data=None) -> str:
+    """Letra vigente da matrícula na data (padrão hoje); sem histórico -> TURNO_SEM."""
+    return atribuir_turno(pd.Series([username]), pd.Series([pd.Timestamp(data or agora_dt().date())]), carregar_turno_historico()).iloc[0]
+
+def _registrar_turno_cur(cur, username, turno, vigente_desde=None, registrado_por="") -> bool:
+    """Grava a letra no cursor do chamador (sem commit). 1º registro da matrícula vale desde
+    sempre (DATA_DESDE_SEMPRE). Retorna False se a letra é inválida ou já é a vigente na data.
+    O chamador roda _ler_turno_historico.clear() depois do commit."""
+    username = str(username or "").strip()
+    if not username or turno not in TURNOS: return False
+    cur.execute("SELECT turno, vigente_desde FROM turno_historico WHERE UPPER(TRIM(username)) = UPPER(%s)", (username,))
+    linhas = cur.fetchall()
+    if not linhas:
+        data = DATA_DESDE_SEMPRE
     else:
-        # 3. Finais de Semana: Revezamento Dia integral (07h as 18h59)
-        return "Turno Dia (07h-19h)"
+        data = pd.Timestamp(vigente_desde or agora_dt().date()).date()
+        anteriores = [(pd.Timestamp(v).date(), t) for t, v in linhas if pd.Timestamp(v).date() <= data]
+        if anteriores and max(anteriores)[1] == turno: return False
+    cur.execute("""
+        INSERT INTO turno_historico (username, turno, vigente_desde, registrado_por)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (username, vigente_desde) DO UPDATE SET
+            turno = EXCLUDED.turno, registrado_por = EXCLUDED.registrado_por, registrado_em = NOW()
+    """, (username, turno, data, str(registrado_por or "").strip()))
+    return True
 #endregion
 
 #region 3.6: Auxiliares da Sidebar — Preparação e Filtros (Blindagem)
@@ -1626,7 +1663,7 @@ def classificar_turno(dt):
 # baixa e registrada em qualquer escopo, entao cada baixa deixava mais uma copia do
 # resultado presa na RAM pra sempre.
 @st.cache_data(show_spinner=False, ttl=600, max_entries=16)
-def preparar_df_visao(df_base: pd.DataFrame, filtro_visao: str) -> pd.DataFrame:
+def preparar_df_visao(df_base: pd.DataFrame, filtro_visao: str, df_turnos: pd.DataFrame) -> pd.DataFrame:
     df_visao = df_base.copy()
     _colunas_obrigatorias = ["Status da Operação", "Data/Hora Realizado", "Data inicial programada"]
     if df_visao.empty or not all(col in df_visao.columns for col in _colunas_obrigatorias):
@@ -1658,10 +1695,10 @@ def preparar_df_visao(df_base: pd.DataFrame, filtro_visao: str) -> pd.DataFrame:
 
     df_visao["Status_norm"] = df_visao["Status da Operação"].astype(str).str.strip().str.upper()
     df_visao["dt_realizado"] = df_visao["Data/Hora Realizado"].apply(parse_datahora_realizado)  # pyright: ignore[reportCallIssue, reportArgumentType]
-    df_visao["Turno"] = df_visao["dt_realizado"].apply(classificar_turno)
+    df_visao["Turno"] = atribuir_turno(df_visao["Concluído por"] if "Concluído por" in df_visao.columns else pd.Series("", index=df_visao.index), df_visao["dt_realizado"], df_turnos)
     df_visao["dia_realizado"] = pd.to_datetime(df_visao["dt_realizado"], errors="coerce").dt.normalize()
     df_visao["dt_prog_filtro"] = pd.to_datetime(df_visao["Data inicial programada"], errors="coerce")
-    df_visao["Turno_Filtro"] = df_visao["Turno"].fillna("Pendente (Sem Turno)")
+    df_visao["Turno_Filtro"] = df_visao["Turno"].fillna(TURNO_PENDENTE)
 
     if "TIPO_INTERVALO_CAN" in df_visao.columns and "Tipo_Intervalo" not in df_visao.columns:
         df_visao["Tipo_Intervalo"] = df_visao["TIPO_INTERVALO_CAN"]
@@ -1878,19 +1915,19 @@ def resumir_demanda_calendario(df_base_cal: pd.DataFrame, ano: int, mes: int, di
 
 #region 3.7.4: Resumo de Conclusões por Turno
 def resumir_conclusoes_por_turno_data(df_base_cal: pd.DataFrame, data_ref) -> dict:
-    ordem_turnos = ["Turno Dia (07h-19h)", "Administrativo (08h-17h30)", "Turno Noite (19h-07h)"]
-    if df_base_cal.empty: return {"labels": ordem_turnos, "valores": [0, 0, 0], "titulo": "Quantidade de OS Concluídas", "subtitulo": "Sem dados"}
+    ordem_turnos = TURNOS_EIXO
+    if df_base_cal.empty: return {"labels": ordem_turnos, "valores": [0] * len(ordem_turnos), "titulo": "Quantidade de OS Concluídas", "subtitulo": "Sem dados"}
     
     df = df_base_cal.copy()
     if "dt_prog_filtro" not in df.columns: df["dt_prog_filtro"] = pd.to_datetime(df["Data inicial programada"], errors="coerce")
     if "dt_realizado" not in df.columns: df["dt_realizado"] = df["Data/Hora Realizado"].apply(parse_datahora_realizado)  # pyright: ignore[reportCallIssue, reportArgumentType]
-    if "Turno" not in df.columns: df["Turno"] = df["dt_realizado"].apply(classificar_turno)
+    if "Turno" not in df.columns: df["Turno"] = atribuir_turno(df["Concluído por"] if "Concluído por" in df.columns else pd.Series("", index=df.index), df["dt_realizado"], carregar_turno_historico())
     if "Status_norm" not in df.columns: df["Status_norm"] = df["Status da Operação"].astype(str).str.strip().str.upper()
 
     data_ref, hoje_ref = pd.to_datetime(data_ref).date(), datetime.now().date()
     df_realizadas = df[df["Status_norm"].isin(_status_prazo | _status_atraso)].copy()
 
-    if df_realizadas.empty: return {"labels": ordem_turnos, "valores": [0, 0, 0], "titulo": "Quantidade de OS Concluídas", "subtitulo": "Sem dados"}
+    if df_realizadas.empty: return {"labels": ordem_turnos, "valores": [0] * len(ordem_turnos), "titulo": "Quantidade de OS Concluídas", "subtitulo": "Sem dados"}
     if data_ref <= hoje_ref:
         df_ref = df_realizadas[pd.to_datetime(df_realizadas["dt_realizado"], errors="coerce").dt.date == data_ref].copy()
         subtitulo = f"Concluídas em {data_ref.strftime('%d/%m/%Y')}"
@@ -3702,6 +3739,7 @@ def render_tela_gestao_usuarios():
             else: def_gov = ["Painel Gerencial", "Mapa de Campo", "Upload de Dados", "Gestão de Usuários", "Exportar SAP", "Exportar Parâmetros", "Governança"]
 
             n_gov = st.multiselect("Permissões de Acesso:", opcoes_gov, default=def_gov, key="novo_user_gov")
+            n_turno = st.selectbox("Turno (opcional)", ["(sem turno)"] + TURNOS, key="novo_user_turno")
 
             if st.form_submit_button("Salvar Novo Usuário"):
                 if n_user and n_nome:
@@ -3712,7 +3750,9 @@ def render_tela_gestao_usuarios():
                             INSERT INTO usuarios (username, nome, senha_hash, perfil, escopo, palavra_recuperacao, dica_recuperacao, coordenacao_padrao, reset_obrigatorio, governanca)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (n_user.strip(), n_nome.strip(), hash_senha("mrs123"), n_perf, n_esco, "PENDENTE", "PENDENTE", n_sede, 1, ",".join(n_gov)))
+                        if n_turno in TURNOS: _registrar_turno_cur(cur, n_user.strip(), n_turno, None, st.session_state.get("username", ""))
                         conn.commit()
+                        _ler_turno_historico.clear()
                         st.session_state["msg_sucesso_user"] = f"Usuário '{n_nome}' ({n_user}) criado com sucesso!"
                         st.rerun(scope="fragment")
                     except psycopg2.IntegrityError: conn.rollback(); st.error("Erro: Esta matrícula/usuário já existe.")
@@ -3748,15 +3788,22 @@ def render_tela_gestao_usuarios():
                         n_esco_edit = st.selectbox("Nova Visão", G.ESCOPOS, index=G.ESCOPOS.index(dados_usr["escopo"]) if dados_usr["escopo"] in G.ESCOPOS else len(G.ESCOPOS) - 1)
                         n_sede_edit = st.selectbox("Sede", sedes_por_escopo(n_esco_edit), format_func=lambda x: x.replace("Sede ", ""))
                         gov_editadas = st.multiselect("Governança:", opcoes_gov, default=[g for g in gov_atual_lista if g in opcoes_gov])
+                        _opc_turno = ["(sem turno)"] + TURNOS
+                        _turno_atual = turno_vigente(usr_sel)
+                        n_turno_edit = st.selectbox("Turno", _opc_turno, index=_opc_turno.index(_turno_atual) if _turno_atual in TURNOS else 0)
+                        n_turno_data = st.date_input("Válido a partir de", value=agora_dt().date(), format="DD/MM/YYYY")
+                        st.caption("No 1º registro, a letra vale para todo o histórico.")
 
                         if st.form_submit_button("Salvar Alterações"):
                             conn = get_connection()
                             try:
                                 cur = conn.cursor()
                                 cur.execute("UPDATE usuarios SET nome=%s, perfil=%s, escopo=%s, coordenacao_padrao=%s, governanca=%s WHERE username=%s", (n_nome_edit.strip(), n_perf_edit, n_esco_edit, n_sede_edit, ",".join(gov_editadas), usr_sel))
+                                if n_turno_edit in TURNOS: _registrar_turno_cur(cur, usr_sel, n_turno_edit, n_turno_data, st.session_state.get("username", ""))
                                 conn.commit(); cur.close()
                             finally:
                                 release_connection(conn)
+                            _ler_turno_historico.clear()
                             st.session_state["msg_sucesso_user"] = f"Cadastro de {n_nome_edit} ({usr_sel}) atualizado!"
                             st.rerun(scope="fragment")
                 elif acao == "🔑 Resetar Senha":
@@ -3787,7 +3834,11 @@ def render_tela_gestao_usuarios():
         #region 8.2.3: Importação em Massa de Colaboradores
         st.markdown("---")
         st.markdown("**📥 Importação em Massa de Colaboradores**")
-        st.caption("A planilha deve conter exatamente as colunas: `username`, `Nome`, `perfil`, `escopo`, `coordenacao_padrao`, `governanca`.")
+        st.caption(
+            "A planilha deve conter as colunas: `username`, `Nome`, `perfil`, `escopo`, `coordenacao_padrao`, `governanca` "
+            "e, opcionalmente, `turno` (Turno A/B/C/D/Administrativo). Para a carga inicial de turnos, basta uma planilha "
+            "só com `username` + `turno`."
+        )
 
         arquivo_users = st.file_uploader("Selecione a planilha de colaboradores (.xlsx ou .csv)", type=["xlsx", "csv"], key="upload_users_massa")
 
@@ -3795,19 +3846,50 @@ def render_tela_gestao_usuarios():
             if st.button("🚀 Processar Cadastro em Massa", use_container_width=True, type="primary", key="btn_users_massa"):
                 with st.spinner("Processando colaboradores..."):
                     try:
-                        if arquivo_users.name.lower().endswith(".csv"): df_users = pd.read_csv(arquivo_users, sep=None, engine="python", encoding="utf-8-sig")
-                        else: df_users = pd.read_excel(arquivo_users)
+                        if arquivo_users.name.lower().endswith(".csv"): df_users = pd.read_csv(arquivo_users, sep=None, engine="python", encoding="utf-8-sig", dtype=str)
+                        else: df_users = pd.read_excel(arquivo_users, dtype=str)
 
                         df_users.columns = [str(c).strip() for c in df_users.columns]
+                        df_users = df_users.rename(columns={c: "turno" for c in df_users.columns if c.lower() == "turno"})
+                        tem_turno = "turno" in df_users.columns
                         colunas_obrigatorias = ["username", "Nome", "perfil", "escopo", "coordenacao_padrao", "governanca"]
                         faltantes = [c for c in colunas_obrigatorias if c not in df_users.columns]
+                        usuario_logado = st.session_state.get("username", "")
 
-                        if faltantes: st.error(f"❌ Colunas obrigatórias ausentes: {', '.join(faltantes)}")
+                        if tem_turno and "username" in df_users.columns and set(faltantes) == set(colunas_obrigatorias) - {"username"}:
+                            # Modo só turno (carga inicial): username + turno; não exige usuário cadastrado.
+                            df_users = df_users.fillna("")
+                            turnos_reg, erros = [], []
+                            for idx, row in df_users.iterrows():
+                                idx = int(idx)  # pyright: ignore[reportArgumentType]
+                                matricula = str(row["username"]).strip()
+                                turno_n = normalizar_turno(row["turno"])
+                                if turno_n == "": continue
+                                if turno_n is None: erros.append(f"Linha {idx + 2}: turno inválido ({str(row['turno']).strip()})."); continue
+                                if not matricula: erros.append(f"Linha {idx + 2}: username/matrícula vazio."); continue
+                                turnos_reg.append((matricula, turno_n))
+
+                            if erros:
+                                st.error("❌ Foram encontrados erros na planilha:")
+                                for e in erros[:20]: st.write(f"- {e}")
+                                if len(erros) > 20: st.write(f"... e mais {len(erros) - 20} erro(s).")
+                            elif not turnos_reg: st.warning("⚠️ Nenhum turno válido encontrado.")
+                            else:
+                                conn = get_connection()
+                                try:
+                                    cur = conn.cursor()
+                                    n_reg = sum(_registrar_turno_cur(cur, m, t, None, usuario_logado) for m, t in turnos_reg)
+                                    conn.commit(); cur.close()
+                                finally: release_connection(conn)
+                                _ler_turno_historico.clear()
+                                st.session_state["msg_sucesso_user"] = f"✅ {n_reg} turno(s) registrado(s), {len(turnos_reg) - n_reg} sem alteração."
+                                st.rerun(scope="fragment")
+                        elif faltantes: st.error(f"❌ Colunas obrigatórias ausentes: {', '.join(faltantes)}")
                         else:
                             df_users = df_users.fillna("")
                             perfis_validos = {"Técnico", "Assistente", "Coordenador", "Especialista", "Gerência", "Administrador"}
                             escopos_validos = set(G.ESCOPOS)
-                            registros, erros = [], []
+                            registros, erros, turnos_reg = [], [], []
 
                             for idx, row in df_users.iterrows():
                                 idx = int(idx)  # pyright: ignore[reportArgumentType]
@@ -3823,6 +3905,9 @@ def render_tela_gestao_usuarios():
                                 if perfil not in perfis_validos: erros.append(f"Linha {idx + 2}: perfil inválido ({perfil})."); continue
                                 if escopo not in escopos_validos: erros.append(f"Linha {idx + 2}: escopo inválido ({escopo})."); continue
                                 if not coordenacao_padrao: erros.append(f"Linha {idx + 2}: coordenacao_padrao vazio."); continue
+                                turno_n = normalizar_turno(row["turno"]) if tem_turno else ""
+                                if turno_n is None: erros.append(f"Linha {idx + 2}: turno inválido ({str(row['turno']).strip()})."); continue
+                                if turno_n: turnos_reg.append((matricula, turno_n))
 
                                 registros.append((matricula, nome, hash_senha("mrs123"), perfil, escopo, "PENDENTE", "PENDENTE", coordenacao_padrao, 1, governanca))
 
@@ -3841,8 +3926,10 @@ def render_tela_gestao_usuarios():
                                         ON CONFLICT (username) DO UPDATE SET
                                             nome = EXCLUDED.nome, perfil = EXCLUDED.perfil, escopo = EXCLUDED.escopo, coordenacao_padrao = EXCLUDED.coordenacao_padrao, governanca = EXCLUDED.governanca
                                         """, registros, page_size=500)
+                                    for m, t in turnos_reg: _registrar_turno_cur(cur, m, t, None, usuario_logado)
                                     conn.commit(); cur.close()
                                 finally: release_connection(conn)
+                                if turnos_reg: _ler_turno_historico.clear()
 
                                 st.session_state["msg_sucesso_user"] = f"✅ Importação concluída! {len(registros)} colaborador(es) processado(s)."
                                 st.rerun(scope="fragment")
@@ -6110,6 +6197,61 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Confirmação mensal de turno (12/11/2026): quem tem "Mapa de Campo" confirma a letra
+# (Turno A/B/C/D/Administrativo) uma vez por mês. Erro ao consultar o banco NÃO bloqueia.
+try: _dlg_turno = st.dialog("Confirmação mensal de turno", dismissible=False)
+except TypeError: _dlg_turno = st.dialog("Confirmação mensal de turno")
+
+def _salvar_turno_mensal(novo, mes):
+    usr = st.session_state.get("username", "")
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        if novo: _registrar_turno_cur(cur, usr, novo, agora_dt().date(), usr)
+        cur.execute("UPDATE usuarios SET turno_confirmado_mes=%s WHERE username=%s", (mes, usr))
+        conn.commit(); cur.close()
+    finally:
+        release_connection(conn)
+    _ler_turno_historico.clear()
+    st.session_state["_turno_mes_ok"] = mes
+    st.session_state.pop("_turno_mudou", None)
+    st.rerun()
+
+@_dlg_turno
+def _dialogo_turno_mensal(mes):
+    atual = turno_vigente(st.session_state.get("username", ""))
+    if atual in TURNOS and not st.session_state.get("_turno_mudou"):
+        st.markdown(f"Seu turno continua sendo **{atual}**?")
+        c1, c2 = st.columns(2)
+        if c1.button("✅ Sim, continua", use_container_width=True, type="primary"): _salvar_turno_mensal(None, mes)
+        if c2.button("🔄 Mudou", use_container_width=True):
+            st.session_state["_turno_mudou"] = True; st.rerun(scope="fragment")
+    else:
+        escolha = st.radio("Qual é o seu turno?", TURNOS, index=None)
+        if st.button("Confirmar", use_container_width=True, type="primary", disabled=escolha is None): _salvar_turno_mensal(escolha, mes)
+
+if "Mapa de Campo" in st.session_state.get("governanca", ""):
+    _mes_turno = agora_dt().strftime("%Y-%m")
+    if st.session_state.get("_turno_mes_ok") != _mes_turno:
+        _conf_mes = _mes_turno  # fail-open: erro de banco não bloqueia o app
+        try:
+            _conn_t = get_connection()
+            try:
+                _cur_t = _conn_t.cursor()
+                _cur_t.execute("SELECT turno_confirmado_mes FROM usuarios WHERE username=%s", (st.session_state.get("username", ""),))
+                _row_t = _cur_t.fetchone(); _cur_t.close()
+                _conf_mes = _row_t[0] if _row_t else _mes_turno
+            finally:
+                release_connection(_conn_t)
+        except Exception as e:
+            print(f"⚠️ confirmação mensal de turno: {e}")
+        if _conf_mes == _mes_turno:
+            st.session_state["_turno_mes_ok"] = _mes_turno
+        else:
+            st.info("Confirme seu turno para continuar.")
+            _dialogo_turno_mensal(_mes_turno)
+            st.stop()
+
 st.sidebar.image("logo_mrs.png", use_container_width=True)
 st.sidebar.caption("SGO Eletroeletrônica • v21.5.0")
 st.sidebar.markdown(
@@ -6277,7 +6419,7 @@ df_base_bruto = carregar_base_sem_overlay(escopo_usuario=st.session_state["escop
 df_base = aplicar_overlay_baixas(df_base_bruto=df_base_bruto, escopo_usuario=st.session_state["escopo"], versao_dados=f"{_v_baixas}|{_v_evid}")
 
 st.session_state["df_os"] = df_base
-df_visao = preparar_df_visao(df_base, filtro_visao)
+df_visao = preparar_df_visao(df_base, filtro_visao, carregar_turno_historico())
 
 if df_visao.empty or "dt_prog_filtro" not in df_visao.columns:
     st.info("📋 Nenhuma OS encontrada. Faça o upload das planilhas em **⚙️ Dados** para começar.")
@@ -6323,7 +6465,7 @@ lista_planos_mes = (
 )
 lista_classificacoes = ["Segurança", "Confiabilidade"]
 lista_criticidades = ["Muito Alta", "Alta", "Média", "Baixa"]
-lista_turnos = ["Turno Dia (07h-19h)", "Administrativo (08h-17h30)", "Turno Noite (19h-07h)", "Pendente (Sem Turno)"]
+lista_turnos = TURNOS + [TURNO_SEM, TURNO_PENDENTE]
 status_opcoes = ["Todos", "Todas Concluídas", "Concluídas no Prazo", "Concluídas com Atraso", "Pendentes", "Atrasado", "NRAV", "NAPL"]
 baixa_evidencia_opcoes = ["Todas", "Com Evidências Online", "Com Evidência Offline", "Sem Evidências", "Manual IW47"]
 
@@ -6501,7 +6643,8 @@ patios_selecionados = st.session_state.get("filtro_patios", list(lista_patios))
 classif_selecionadas = st.session_state.get("filtro_classificacoes", list(lista_classificacoes))
 grupos_ativo_selecionados = st.session_state.get("filtro_grupos_ativo", list(lista_grupos_ativo))
 ativos_selecionados = st.session_state.get("filtro_ativos", list(lista_ativos))
-turnos_selecionados = st.session_state.get("filtro_turnos", list(lista_turnos))
+# Filtra por lista_turnos: seleção de sessão viva com os rótulos antigos (por horário) não quebra.
+turnos_selecionados = [t for t in st.session_state.get("filtro_turnos", list(lista_turnos)) if t in lista_turnos]
 status_sel = st.session_state.get("filtro_status_sel", "Todos")
 intervalo_sel = st.session_state.get("filtro_intervalo_sel", "Todas")
 baixa_evidencia_sel = st.session_state.get("filtro_baixa_evidencia_sel", "Todas")
