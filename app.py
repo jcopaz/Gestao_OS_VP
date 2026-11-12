@@ -7310,7 +7310,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
 #region 10.2.2c: Visão por Coordenação (sem precisar filtrar Coordenação na lateral)
                 with st.expander("📊 Visão por Coordenação", expanded=True):
                     st.caption(
-                        "Comparativo Paranapiacaba x Piaçaguera lado a lado -- útil sobretudo na visão "
+                        "Comparativo entre coordenações lado a lado -- útil sobretudo na visão "
                         "'Gerência', que já traz as duas coordenações juntas na base filtrada."
                     )
 
@@ -7358,8 +7358,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                         # Um grafico por coordenacao (nao mais 1 so com as 2 agrupadas) -- mesmo
                         # padrao ja usado e comprovado no Top 10 Segurança Pendente logo abaixo
                         # (st.columns(2), cada coluna com seu proprio st_echarts).
-                        col_24h_pia, col_24h_para = st.columns(2)
-                        for _coord_nome, _col_24h in (("Piaçaguera", col_24h_pia), ("Paranapiacaba", col_24h_para)):
+                        for _coord_nome, _col_24h in zip(G.NOMES, st.columns(len(G.NOMES))):
                             with _col_24h:
                                 st.caption(_coord_nome)
                                 d_coord_24h = df_24h[df_24h["Coordenacao"] == _coord_nome]
@@ -7421,8 +7420,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
 
                     st.markdown("##### Top 10 Ativos com OS de Confiabilidade Pendente (CI/SI) por Coordenação")
                     _mask_conf_pendente = (df_coord["Classificacao"] == "Confiabilidade") & (~df_coord["Status_concluida"])
-                    col_conf_pend_pia, col_conf_pend_para = st.columns(2)
-                    for _coord_nome, _col_conf_pend in (("Piaçaguera", col_conf_pend_pia), ("Paranapiacaba", col_conf_pend_para)):
+                    for _coord_nome, _col_conf_pend in zip(G.NOMES, st.columns(len(G.NOMES))):
                         with _col_conf_pend:
                             st.caption(_coord_nome)
                             _mask_coord_conf_pend = _mask_conf_pendente & (df_coord["Coordenacao"] == _coord_nome)
@@ -7450,8 +7448,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                     st.divider()
                     st.markdown("##### Top 10 Ativos com OS de Segurança Pendente (CI/SI) por Coordenação")
                     _mask_seg_pendente = (df_coord["Classificacao"] == "Segurança") & (~df_coord["Status_concluida"])
-                    col_pend_pia, col_pend_para = st.columns(2)
-                    for _coord_nome, _col_pend in (("Piaçaguera", col_pend_pia), ("Paranapiacaba", col_pend_para)):
+                    for _coord_nome, _col_pend in zip(G.NOMES, st.columns(len(G.NOMES))):
                         with _col_pend:
                             st.caption(_coord_nome)
                             _mask_coord_pendente = _mask_seg_pendente & (df_coord["Coordenacao"] == _coord_nome)
@@ -7834,7 +7831,7 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                     from io import BytesIO
                     import matplotlib.gridspec as gridspec
 
-                    _cats_coord_png = list(_cats_c or ["Paranapiacaba", "Piaçaguera"])
+                    _cats_coord_png = list(_cats_c or G.NOMES)
 
                     _total = int(len(_df_c))
                     _real_tot = int(_df_c["Status_concluida"].sum())
@@ -7944,14 +7941,14 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                     #    coloca no height_ratios como area util pro eixo (o resto vira gap entre
                     #    linhas) -- por isso divide por 0.65 (nao so por 1.0) abaixo.
                     _larg_fig = 16.0
-                    _alt_titulo, _alt_kpi, _alt_top, _alt_meio, _alt_patio, _alt_pend, _alt_pend_seg = 1.0, 0.55, 3.6, 3.1, 3.3, 3.3, 6.2
+                    _alt_titulo, _alt_kpi, _alt_top, _alt_meio, _alt_24h, _alt_patio, _alt_pend, _alt_pend_seg = 1.0, 0.55, 3.6, 3.1, 3.1, 3.3, 3.3, 6.2
                     _alt_prod = max(1.6, (0.6 + (len(_cell_prod) + 1) * 0.24) / 0.65)
-                    _alt_total = _alt_titulo + _alt_kpi + _alt_top + _alt_meio + _alt_patio + _alt_pend + _alt_pend_seg + _alt_prod + 0.4
+                    _alt_total = _alt_titulo + _alt_kpi + _alt_top + _alt_meio + _alt_24h + _alt_patio + _alt_pend + _alt_pend_seg + _alt_prod + 0.4
 
                     fig = plt.figure(figsize=(_larg_fig, _alt_total))
                     gs = gridspec.GridSpec(
-                        7, 4, figure=fig,
-                        height_ratios=[_alt_kpi, _alt_top, _alt_meio, _alt_patio, _alt_pend, _alt_pend_seg, _alt_prod],
+                        8, 4, figure=fig,
+                        height_ratios=[_alt_kpi, _alt_top, _alt_meio, _alt_24h, _alt_patio, _alt_pend, _alt_pend_seg, _alt_prod],
                         # left maior (nao 0.045): nome de ativo comprido (ex. "ICQ S-ICQ005D1
                         # SINALEIRO PN") nos graficos de Pendente cortava no eixo Y com margem
                         # estreita.
@@ -7990,43 +7987,48 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                         "Planejado x Realizado (CI/SI) por Coordenação",
                     )
 
-                    # --- linha Segurança/Confiabilidade por coordenação + 24h x2 ---
+                    # --- linha Segurança/Confiabilidade por coordenação ---
                     for _classif_nome, _col in (("Segurança", 0), ("Confiabilidade", 1)):
                         _mask_cl = _df_c["Classificacao"] == _classif_nome
                         p_ci, p_si, _ = _contagens_micro(_df_c, "Coordenacao", _cats_coord_png, mask=_mask_cl)
                         r_ci, r_si, _ = _contagens_micro(_df_c, "Coordenacao", _cats_coord_png, mask=(_mask_cl & _df_c["Status_concluida"]))
-                        _desenhar_pxr_vertical(fig.add_subplot(gs[2, _col]), _cats_coord_png, p_ci, p_si, r_ci, r_si, f"{_classif_nome} por Coordenação")
-                    for _idx, _coord_nome in enumerate(_cats_coord_png[:2]):
-                        _desenhar_24h_coord(fig.add_subplot(gs[2, 2 + _idx]), _turnos_png, _dados_turno_coord(_coord_nome), f"Realizado 24h — {_coord_nome}")
+                        _desenhar_pxr_vertical(fig.add_subplot(gs[2, _col * 2:_col * 2 + 2]), _cats_coord_png, p_ci, p_si, r_ci, r_si, f"{_classif_nome} por Coordenação")
+
+                    # --- linha 24h: um bloco por coordenação ---
+                    _gs_24h = gridspec.GridSpecFromSubplotSpec(1, len(G.NOMES), subplot_spec=gs[3, :], wspace=0.45)
+                    for _idx, _coord_nome in enumerate(G.NOMES):
+                        _desenhar_24h_coord(fig.add_subplot(_gs_24h[0, _idx]), _turnos_png, _dados_turno_coord(_coord_nome), f"Realizado 24h — {_coord_nome}")
 
                     # --- linha Segurança x Pátio (Top 5) ---
                     _mask_seg = _df_c["Classificacao"] == "Segurança"
                     _cats_seg_patio = _top_n_micro(_df_c[_mask_seg], "Patio", n=5)
                     p_ci_sp, p_si_sp, _ = _contagens_micro(_df_c, "Patio", _cats_seg_patio, mask=_mask_seg)
                     r_ci_sp, r_si_sp, _ = _contagens_micro(_df_c, "Patio", _cats_seg_patio, mask=(_mask_seg & _df_c["Status_concluida"]))
-                    _desenhar_pxr_horizontal(fig.add_subplot(gs[3, :]), _cats_seg_patio, p_ci_sp, p_si_sp, r_ci_sp, r_si_sp, "OS de Segurança (CI/SI) por Pátio (Top 5)")
+                    _desenhar_pxr_horizontal(fig.add_subplot(gs[4, :]), _cats_seg_patio, p_ci_sp, p_si_sp, r_ci_sp, r_si_sp, "OS de Segurança (CI/SI) por Pátio (Top 5)")
 
                     # --- linha Confiabilidade Pendente por coordenação ---
                     _mask_conf_pend = (_df_c["Classificacao"] == "Confiabilidade") & (~_df_c["Status_concluida"])
-                    for _idx, _coord_nome in enumerate(("Piaçaguera", "Paranapiacaba")):
+                    _gs_cp = gridspec.GridSpecFromSubplotSpec(1, len(G.NOMES), subplot_spec=gs[5, :], wspace=0.45)
+                    for _idx, _coord_nome in enumerate(G.NOMES):
                         _mask_cp = _mask_conf_pend & (_df_c["Coordenacao"] == _coord_nome)
                         _cats_p = _top_n_micro(_df_c[_mask_cp], "Ativo", n=10)
                         _ci_p, _si_p, _ = _contagens_micro(_df_c, "Ativo", _cats_p, mask=_mask_cp)
                         _desenhar_pendente_horizontal(
-                            fig.add_subplot(gs[4, _idx * 2:_idx * 2 + 2]), _cats_p, _ci_p, _si_p,
+                            fig.add_subplot(_gs_cp[0, _idx]), _cats_p, _ci_p, _si_p,
                             f"Confiabilidade Pendente Top 10 — {_coord_nome}", "#1D4ED8", "#60A5FA", "#1E3A8A",
                         )
 
                     # --- linha Segurança Pendente por coordenação (Top 20 -- pedido 28/07/2026) ---
                     _mask_seg_pend = (_df_c["Classificacao"] == "Segurança") & (~_df_c["Status_concluida"])
-                    for _idx, _coord_nome in enumerate(("Piaçaguera", "Paranapiacaba")):
+                    _gs_sp = gridspec.GridSpecFromSubplotSpec(1, len(G.NOMES), subplot_spec=gs[6, :], wspace=0.45)
+                    for _idx, _coord_nome in enumerate(G.NOMES):
                         _mask_cp = _mask_seg_pend & (_df_c["Coordenacao"] == _coord_nome)
                         _cats_p = _top_n_micro(_df_c[_mask_cp], "Ativo", n=20)
                         _ci_p, _si_p, _ = _contagens_micro(_df_c, "Ativo", _cats_p, mask=_mask_cp)
-                        _desenhar_pendente_horizontal(fig.add_subplot(gs[5, _idx * 2:_idx * 2 + 2]), _cats_p, _ci_p, _si_p, f"Segurança Pendente Top 20 — {_coord_nome}")
+                        _desenhar_pendente_horizontal(fig.add_subplot(_gs_sp[0, _idx]), _cats_p, _ci_p, _si_p, f"Segurança Pendente Top 20 — {_coord_nome}")
 
                     # --- linha Produção do Dia (dados já calculados acima, antes do GridSpec) ---
-                    ax_prod = fig.add_subplot(gs[6, :])
+                    ax_prod = fig.add_subplot(gs[7, :])
                     ax_prod.axis("off")
                     ax_prod.set_title(
                         f"Produção do Dia — Baixas de Hoje ({_hoje_00h.strftime('%d/%m %H:%M')} até {_agora_png.strftime('%H:%M')})",
@@ -8381,11 +8383,10 @@ if st.session_state.get("tela_atual", "dashboard") == "dashboard":
                 if not df_recomendado.empty:
                     pacote_html_bytes = gerar_html_offline(df_recomendado, st.session_state.get("username", "tecnico"))
 
-                    base_api = st.secrets.get(
-                        "OFFLINE_API_URL",
-                        "https://gestao-os-ee-mrs-producao.onrender.com/sincronizar_baixa_offline"
-                    ).rsplit("/", 1)[0]
-                    if st.button("🌐 Publicar Rota PWA (abrir online 1x no celular)", use_container_width=True, type="primary"):
+                    base_api = st.secrets.get("OFFLINE_API_URL", G.API_URL_PADRAO).rsplit("/", 1)[0]
+                    if not base_api:
+                        st.warning("⚙️ Configure o secret OFFLINE_API_URL para publicar o pacote offline.")
+                    elif st.button("🌐 Publicar Rota PWA (abrir online 1x no celular)", use_container_width=True, type="primary"):
                         try:
                             usuario_pwa = st.session_state.get("username", "tecnico")
                             # Espera ativa pela API (cold start do Render free: dorme após 15 min e o
@@ -8646,9 +8647,9 @@ def _render_apontamento(df_recomendado_ui: pd.DataFrame):
     # coordenação da OS, o bloqueio não se aplica àquela linha — mas o aviso abaixo continua
     # informando quais são as OS Muito Alta pendentes, sem impedir a seleção.
     if "Coordenacao" in df_recomendado_ui.columns:
-        _coord_row = df_recomendado_ui["Coordenacao"].fillna("Paranapiacaba").astype(str).str.strip()
+        _coord_row = df_recomendado_ui["Coordenacao"].fillna(G.COORD_PADRAO).astype(str).str.strip()
     else:
-        _coord_row = pd.Series("Paranapiacaba", index=df_recomendado_ui.index)
+        _coord_row = pd.Series(G.COORD_PADRAO, index=df_recomendado_ui.index)
     _trava_por_coord = {c: carregar_config_operacional(c)["trava_prioridade_ativa"] for c in _coord_row.unique()}
     _trava_ativa_row = _coord_row.map(_trava_por_coord).fillna(True)
 
@@ -8936,7 +8937,7 @@ def _render_apontamento(df_recomendado_ui: pd.DataFrame):
                 if coord_ativo is None:
                     os_sem_geo.append(os_id_geo)
                     continue
-                coord_os = str(df_match_geo["Coordenacao"].iloc[0]).strip() if "Coordenacao" in df_match_geo.columns else "Paranapiacaba"
+                coord_os = str(df_match_geo["Coordenacao"].iloc[0]).strip() if "Coordenacao" in df_match_geo.columns else G.COORD_PADRAO
                 geofence_limite = carregar_config_operacional(coord_os)["geofence_km"]
                 dist_km = haversine_vectorized(lat_atual, lon_atual, pd.Series([coord_ativo[0]]), pd.Series([coord_ativo[1]]))[0]
                 if dist_km > geofence_limite:
@@ -9166,9 +9167,9 @@ def _render_apontamento_nrav(df_recomendado_ui: pd.DataFrame):
     grupos_bloqueados = set(_grupo_bloq[mask_critica].unique())
 
     if "Coordenacao" in df_recomendado_ui.columns:
-        _coord_row = df_recomendado_ui["Coordenacao"].fillna("Paranapiacaba").astype(str).str.strip()
+        _coord_row = df_recomendado_ui["Coordenacao"].fillna(G.COORD_PADRAO).astype(str).str.strip()
     else:
-        _coord_row = pd.Series("Paranapiacaba", index=df_recomendado_ui.index)
+        _coord_row = pd.Series(G.COORD_PADRAO, index=df_recomendado_ui.index)
     _trava_por_coord = {c: carregar_config_operacional(c)["trava_prioridade_ativa"] for c in _coord_row.unique()}
     _trava_ativa_row = _coord_row.map(_trava_por_coord).fillna(True)
 
@@ -9317,7 +9318,7 @@ def _render_apontamento_nrav(df_recomendado_ui: pd.DataFrame):
                 if coord_ativo is None:
                     os_sem_geo_nrav.append(os_id_geo)
                     continue
-                coord_os = str(df_match_geo["Coordenacao"].iloc[0]).strip() if "Coordenacao" in df_match_geo.columns else "Paranapiacaba"
+                coord_os = str(df_match_geo["Coordenacao"].iloc[0]).strip() if "Coordenacao" in df_match_geo.columns else G.COORD_PADRAO
                 geofence_limite = carregar_config_operacional(coord_os)["geofence_km"]
                 dist_km = haversine_vectorized(lat_atual, lon_atual, pd.Series([coord_ativo[0]]), pd.Series([coord_ativo[1]]))[0]
                 if dist_km > geofence_limite:
@@ -9564,7 +9565,7 @@ def _construir_mapa_navegacao(lat_centro, lon_centro, zoom_mapa, lat_origem, lon
     # e o tooltip/icone da origem ficaria preso no valor antigo.
     mapa = folium.Map(
         location=[lat_centro, lon_centro], zoom_start=zoom_mapa, max_bounds=True,
-        min_lat=-25.50, max_lat=-19.50, min_lon=-53.50, max_lon=-44.00,
+        **G.LIMITES_MAPA,
         # "CartoDB positron" (26/08/2026): a Carto passou a exigir API key nos tiles
         # de basemap - sem ela, o tile server devolve um aviso "API KEY REQUIRED"
         # cobrindo o mapa inteiro em vez do mapa de verdade. Trocado primeiro pro
@@ -9662,7 +9663,7 @@ def _construir_mapa_navegacao(lat_centro, lon_centro, zoom_mapa, lat_origem, lon
 if tab2 is not None:
   with col_mapa:  # pyright: ignore[reportGeneralTypeIssues]
     lat_centro = min(max(lat_origem, -25.50), -19.50)
-    lon_centro = min(max(lon_origem, -53.50), -44.00)
+    lon_centro = min(max(lon_origem, G.LIMITES_MAPA["min_lon"]), G.LIMITES_MAPA["max_lon"])
     zoom_mapa = int(min(18, max(6, round(math.log2(360.0 / max((2.0 * max(float(raio_busca_km), 0.5)) / (111.320 * max(math.cos(math.radians(float(lat_centro))), 0.20)), 1e-6))))))
 
     agg_map = None
